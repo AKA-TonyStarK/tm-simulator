@@ -30,7 +30,7 @@
 
   /* ===== RESET & BASE ===== */
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  html { overflow-x: hidden; scroll-behavior: smooth; }
+  html { overflow-x: hidden; scroll-behavior: auto; /* SCROLL FIX: prevent page-level smooth scroll that can compound with scrollIntoView */ }
   body {
     background: var(--bg);
     color: var(--text);
@@ -220,6 +220,8 @@
     padding: 8px 0 4px;
     scrollbar-width: thin;
     scrollbar-color: var(--border2) transparent;
+    /* SCROLL/VIEWPORT FIX: Enable smooth scrolling within the tape container only */
+    scroll-behavior: smooth;
   }
   .tape {
     display: flex;
@@ -667,11 +669,14 @@
           </div>
 
           <!-- Speed -->
+          <!-- SPEED FIX: Slider now represents steps/sec (1–20). Higher = faster.
+               Delay is computed as: delay_ms = 1000 / speed_value
+               So speed=1 → 1000ms delay (slow), speed=20 → 50ms delay (fast). -->
           <div class="speed-row">
             <label>Speed</label>
-            <input type="range" id="speed" min="50" max="2000" value="350" step="50"
-                   oninput="document.getElementById('speed-label').textContent=this.value+'ms'">
-            <span id="speed-label" style="font-family:var(--mono);font-size:11px;color:var(--text2);min-width:52px;">350ms</span>
+            <input type="range" id="speed" min="1" max="20" value="3" step="1"
+                   oninput="document.getElementById('speed-label').textContent=this.value+'x'">
+            <span id="speed-label" style="font-family:var(--mono);font-size:11px;color:var(--text2);min-width:52px;">3x</span>
           </div>
 
           <!-- Transition Log -->
@@ -1069,12 +1074,17 @@ function renderTape(flashCell = -1) {
     container.appendChild(cell);
   });
 
-  // Scroll head to center
+  // SCROLL/VIEWPORT FIX + BONUS SMOOTH ANIMATION:
+  // Scroll the tape's own overflow container (tape-outer) to keep the active
+  // head cell centered. We use scrollTo({ behavior: 'smooth' }) for a smooth
+  // glide effect. Crucially, we do NOT use scrollIntoView() which would scroll
+  // the entire page. The setTimeout gives the DOM a tick to paint new cells first.
   setTimeout(() => {
     const outer = document.getElementById('tape-outer');
     const headCell = container.children[headIdx];
-    if (headCell) {
-      outer.scrollLeft = headCell.offsetLeft - outer.clientWidth / 2 + headCell.offsetWidth / 2;
+    if (headCell && outer) {
+      const targetScrollLeft = headCell.offsetLeft - outer.clientWidth / 2 + headCell.offsetWidth / 2;
+      outer.scrollTo({ left: targetScrollLeft, behavior: 'smooth' });
     }
   }, 10);
 
@@ -1151,9 +1161,25 @@ function renderLiveDelta() {
     tbody.appendChild(tr);
   });
 
-  // Scroll highlighted row into view
+  // SCROLL/VIEWPORT FIX: Use container-relative scrollTop instead of scrollIntoView().
+  // scrollIntoView() scrolls the entire page toward the transition table, pulling
+  // focus away from the tape. Instead, we scroll only within the table's own
+  // overflow container, keeping the page scroll position unchanged.
   const active = tbody.querySelector('.current-transition');
-  if (active) active.scrollIntoView({ block: 'nearest' });
+  if (active) {
+    const tableContainer = tbody.closest('[style*="overflow"]') || tbody.closest('div');
+    if (tableContainer) {
+      const rowTop    = active.offsetTop;
+      const rowBottom = rowTop + active.offsetHeight;
+      const visTop    = tableContainer.scrollTop;
+      const visBottom = visTop + tableContainer.clientHeight;
+      if (rowTop < visTop) {
+        tableContainer.scrollTop = rowTop - 4;
+      } else if (rowBottom > visBottom) {
+        tableContainer.scrollTop = rowBottom - tableContainer.clientHeight + 4;
+      }
+    }
+  }
 }
 
 /** Render the edit-mode delta table (for Transitions tab) */
@@ -1352,7 +1378,12 @@ function runAuto() {
 
 function scheduleStep() {
   if (!Sim.running) return;
-  const delay = parseInt(document.getElementById('speed').value);
+  // SPEED FIX: speed slider is now 1–20 (steps/sec).
+  // Convert to delay: delay_ms = 1000 / speed.
+  // Higher speed value → smaller delay → faster execution. (Corrected from original
+  // which used the slider value directly as ms, making higher = slower.)
+  const speedValue = parseInt(document.getElementById('speed').value);
+  const delay = Math.round(1000 / speedValue);
   Sim.timer = setTimeout(() => {
     if (!Sim.running) return;
     const result = Sim.doStep();
