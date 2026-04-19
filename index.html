@@ -1,0 +1,1473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Turing Machine Simulator</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* ===== DESIGN TOKENS ===== */
+  :root {
+    --bg:      #0a0b0e;
+    --bg2:     #12141a;
+    --bg3:     #1a1d26;
+    --bg4:     #222535;
+    --border:  #2a2f42;
+    --border2: #363d56;
+    --accent:  #4f7cff;
+    --accent2: #7c4fff;
+    --accent3: #ff4f7c;
+    --green:   #4fffa0;
+    --amber:   #ffd24f;
+    --red:     #ff5c5c;
+    --text:    #e8ecf4;
+    --text2:   #8892b0;
+    --text3:   #4a5270;
+    --mono:    'JetBrains Mono', monospace;
+    --sans:    'Space Grotesk', sans-serif;
+    --cell-w:  52px;
+  }
+
+  /* ===== RESET & BASE ===== */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { overflow-x: hidden; scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    min-height: 100vh;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  /* ===== BACKGROUND DECORATIONS ===== */
+  .scanline-bg {
+    position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent, transparent 2px,
+      rgba(79,124,255,0.012) 2px, rgba(79,124,255,0.012) 4px
+    );
+  }
+  .grid-bg {
+    position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background-image:
+      linear-gradient(var(--border) 1px, transparent 1px),
+      linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 40px 40px;
+    opacity: 0.15;
+    animation: grid-drift 40s linear infinite;
+  }
+  @keyframes grid-drift {
+    from { background-position: 0 0, 0 0; }
+    to   { background-position: 40px 40px, 40px 40px; }
+  }
+
+  /* Ambient glow orbs */
+  .orb { position: fixed; border-radius: 50%; pointer-events: none; z-index: 0; filter: blur(90px); opacity: 0.055; }
+  .orb-1 { width: 480px; height: 480px; background: #4f7cff; top: -120px; left: -80px; animation: orb1 20s ease-in-out infinite; }
+  .orb-2 { width: 380px; height: 380px; background: #7c4fff; bottom: -80px; right: -60px; animation: orb2 25s ease-in-out infinite; }
+  .orb-3 { width: 260px; height: 260px; background: #ff4f7c; top: 45%; left: 55%; animation: orb3 30s ease-in-out infinite; }
+  @keyframes orb1 { 0%,100%{transform:translate(0,0)} 40%{transform:translate(50px,35px)} 70%{transform:translate(-20px,60px)} }
+  @keyframes orb2 { 0%,100%{transform:translate(0,0)} 35%{transform:translate(-45px,-35px)} 65%{transform:translate(25px,-60px)} }
+  @keyframes orb3 { 0%,100%{transform:translate(-50%,-50%) scale(1)} 50%{transform:translate(-50%,-50%) scale(1.2)} }
+
+  /* ===== PAGE LOAD ANIMATIONS ===== */
+  @keyframes fade-up {
+    from { opacity: 0; transform: translateY(16px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .header    { animation: fade-up .5s ease both; }
+  .left-col  { animation: fade-up .6s .07s ease both; }
+  .right-col { animation: fade-up .6s .14s ease both; }
+
+  /* Header dot breathing */
+  .header .dot { animation: dot-breathe 3.5s ease-in-out infinite; }
+  .header .dot:nth-child(2){ animation-delay:.3s }
+  .header .dot:nth-child(4){ animation-delay:.6s }
+  .header .dot:nth-child(6){ animation-delay:.9s }
+  .header .dot:nth-child(8){ animation-delay:1.2s }
+  @keyframes dot-breathe { 0%,100%{ opacity:1; transform:scale(1); } 50%{ opacity:.4; transform:scale(.65); } }
+
+  /* Panel hover lift */
+  .panel { transition: box-shadow .25s, border-color .25s; }
+  .panel:hover { box-shadow: 0 0 28px rgba(79,124,255,0.06); border-color: var(--border2); }
+
+  /* Button press feedback */
+  .btn:active:not(:disabled) { transform: scale(0.96); }
+
+  /* Example button hover slide */
+  .example-btn:hover { transform: translateX(3px); }
+
+  /* ===== LAYOUT ===== */
+  #app {
+    position: relative; z-index: 1;
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 24px 20px 60px;
+    min-width: 0;
+  }
+  .header { text-align: center; margin-bottom: 32px; }
+  .header h1 {
+    font-family: var(--mono);
+    font-size: clamp(15px, 3.2vw, 30px);
+    font-weight: 700;
+    letter-spacing: -1px;
+    background: linear-gradient(135deg, #4f7cff, #7c4fff, #ff4f7c);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 6px;
+  }
+  .header p { color: var(--text2); font-size: 12px; font-family: var(--mono); }
+  .header .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin: 0 6px; vertical-align: middle; }
+
+  /* ===== RESPONSIVE TWO-COLUMN GRID ===== */
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+    gap: 20px;
+    align-items: start;
+  }
+  @media (max-width: 900px)  { .layout { grid-template-columns: 1fr; } }
+  @media (max-width: 480px)  {
+    #app { padding: 14px 10px 60px; }
+    :root { --cell-w: 42px; }
+    .add-trans { grid-template-columns: repeat(3,1fr) auto; }
+  }
+
+  /* ===== PANEL ===== */
+  .panel {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .panel-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--bg3);
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text2);
+  }
+  .panel-header .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .panel-body { padding: 16px; }
+
+  /* ===== FORM ELEMENTS ===== */
+  label {
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--text2);
+    margin-bottom: 5px;
+    font-family: var(--mono);
+  }
+  input, textarea, select {
+    width: 100%;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    padding: 8px 10px;
+    outline: none;
+    transition: border-color .2s;
+  }
+  input:focus, textarea:focus, select:focus { border-color: var(--accent); }
+  textarea { resize: vertical; min-height: 80px; line-height: 1.6; }
+  .field { margin-bottom: 12px; }
+
+  /* ===== BUTTONS ===== */
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 8px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border2);
+    background: var(--bg3);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all .18s;
+    letter-spacing: .5px;
+    white-space: nowrap;
+  }
+  .btn:hover { background: var(--bg4); border-color: var(--accent); color: var(--accent); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { background: #3d6ae8; }
+  .btn.danger { background: transparent; border-color: var(--red); color: var(--red); }
+  .btn.danger:hover { background: rgba(255,92,92,0.1); }
+  .btn.green-btn { background: transparent; border-color: var(--green); color: var(--green); }
+  .btn.green-btn:hover { background: rgba(79,255,160,0.1); }
+  .btn:disabled { opacity: .35; cursor: not-allowed; pointer-events: none; }
+  .btn-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+
+  /* ===== TAPE ===== */
+  .tape-outer {
+    overflow-x: auto;
+    padding: 8px 0 4px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border2) transparent;
+  }
+  .tape {
+    display: flex;
+    align-items: flex-end;
+    min-width: max-content;
+    padding: 0 20px;
+  }
+  .tape-cell {
+    width: var(--cell-w);
+    height: 52px;
+    border: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--mono);
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text2);
+    background: var(--bg3);
+    position: relative;
+    transition: background .15s, border-color .15s, transform .15s, box-shadow .15s, color .15s;
+    flex-shrink: 0;
+  }
+  .tape-cell:first-child { border-radius: 8px 0 0 8px; }
+  .tape-cell:last-child  { border-radius: 0 8px 8px 0; }
+  .tape-cell.active {
+    background: rgba(79,124,255,0.12);
+    border-color: var(--accent);
+    color: var(--accent);
+    transform: scaleY(1.08);
+    box-shadow: 0 0 20px rgba(79,124,255,0.25);
+    z-index: 2;
+  }
+  /* Head arrow above active cell */
+  .tape-cell.active::before {
+    content: '';
+    position: absolute;
+    top: -18px; left: 50%;
+    transform: translateX(-50%);
+    width: 0; height: 0;
+    border-left: 7px solid transparent;
+    border-right: 7px solid transparent;
+    border-top: 10px solid var(--accent);
+  }
+  /* Flash green on write */
+  .tape-cell.wrote {
+    background: rgba(79,255,160,0.1);
+    border-color: var(--green);
+    color: var(--green);
+  }
+  .tape-cell .idx {
+    position: absolute; bottom: 2px;
+    font-size: 8px; color: var(--text3); font-family: var(--mono);
+  }
+  .head-indicator {
+    height: 24px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono); font-size: 11px; color: var(--accent);
+    gap: 4px; margin-bottom: 2px;
+  }
+  .head-arrow { font-size: 18px; animation: pulse-down .8s ease-in-out infinite; }
+  @keyframes pulse-down { 0%,100%{transform:translateY(0);opacity:1} 50%{transform:translateY(3px);opacity:.7} }
+
+  /* Write flash: briefly highlight cell that just got written */
+  @keyframes write-flash {
+    0%   { background: rgba(79,255,160,0.22); border-color: var(--green); }
+    100% { background: rgba(79,124,255,0.12); border-color: var(--accent); }
+  }
+  .tape-cell.active.just-wrote { animation: write-flash .35s ease forwards; }
+
+  /* Log entry slide-in */
+  @keyframes log-slide {
+    from { opacity: 0; transform: translateX(-8px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+  .log-entry { animation: log-slide .18s ease both; }
+
+  /* ===== STATE DISPLAY ===== */
+  .state-display {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .state-box {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    text-align: center;
+    transition: border-color .2s;
+  }
+  .state-box .label { font-size: 10px; color: var(--text3); font-family: var(--mono); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+  .state-box .value { font-family: var(--mono); font-size: 15px; font-weight: 700; color: var(--accent); }
+  .state-box.accept { border-color: var(--green); }
+  .state-box.accept .value { color: var(--green); }
+  .state-box.reject { border-color: var(--red); }
+  .state-box.reject .value { color: var(--red); }
+  .state-box.running { border-color: var(--amber); }
+  .state-box.running .value { color: var(--amber); }
+
+  /* ===== STATUS BAR ===== */
+  .status-bar {
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-family: var(--mono);
+    font-size: 12px;
+    border: 1px solid var(--border);
+    background: var(--bg3);
+    margin-bottom: 16px;
+    display: flex; align-items: center; gap: 8px;
+    min-height: 38px;
+    word-break: break-word;
+    transition: border-color .2s, background .2s, color .2s;
+  }
+  .status-bar.ok   { border-color: var(--green);  background: rgba(79,255,160,0.05);  color: var(--green);  }
+  .status-bar.err  { border-color: var(--red);    background: rgba(255,92,92,0.05);   color: var(--red);    }
+  .status-bar.info { border-color: var(--accent);  background: rgba(79,124,255,0.05); color: var(--accent); }
+  .status-bar.warn { border-color: var(--amber);  background: rgba(255,210,79,0.05); color: var(--amber);  }
+
+  /* ===== TRANSITION LOG ===== */
+  .transition-log {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text2);
+    overflow-y: auto;
+    max-height: 150px;
+    padding: 8px;
+  }
+  .log-entry { padding: 2px 0; border-bottom: 1px solid var(--bg4); display: flex; gap: 6px; align-items: baseline; }
+  .log-entry:last-child { border-bottom: none; }
+  .log-step  { color: var(--text3); min-width: 36px; }
+  .log-arrow { color: var(--accent); }
+  .log-accept { color: var(--green); font-weight: 600; }
+  .log-reject { color: var(--red);   font-weight: 600; }
+
+  /* ===== SPEED SLIDER ===== */
+  .speed-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .speed-row label { margin: 0; white-space: nowrap; }
+  input[type=range] { flex: 1; accent-color: var(--accent); }
+
+  /* ===== TABS ===== */
+  .tab-row { display: flex; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+  .tab {
+    padding: 8px 14px; cursor: pointer;
+    font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: .5px;
+    color: var(--text3); border-bottom: 2px solid transparent;
+    transition: all .15s;
+  }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab:hover { color: var(--text2); }
+
+  /* ===== DELTA TABLE ===== */
+  .delta-table {
+    width: 100%; border-collapse: collapse;
+    font-family: var(--mono); font-size: 11px;
+  }
+  .delta-table th {
+    padding: 5px 8px; background: var(--bg4);
+    color: var(--text3); text-transform: uppercase;
+    letter-spacing: .8px; border-bottom: 1px solid var(--border);
+    text-align: left;
+  }
+  .delta-table td { padding: 4px 8px; border-bottom: 1px solid var(--bg4); color: var(--text2); }
+  .delta-table tr.current-transition td { background: rgba(79,124,255,0.12); color: var(--accent); }
+  .delta-table tr:hover td { background: var(--bg4); }
+  .delta-table .del-btn {
+    cursor: pointer; color: var(--red); background: none;
+    border: none; font-size: 14px; padding: 0 4px;
+  }
+  .delta-table .del-btn:hover { color: #ff8888; }
+
+  /* ===== ADD TRANSITION FORM ===== */
+  .add-trans {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr) auto;
+    gap: 6px;
+    align-items: end;
+    margin-top: 10px;
+  }
+  .add-trans input  { padding: 6px 8px; font-size: 11px; }
+  .add-trans .btn   { padding: 7px 10px; font-size: 11px; }
+  .add-trans .field { margin-bottom: 0; }
+
+  /* ===== EXAMPLES ===== */
+  .examples-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .example-btn {
+    padding: 10px 12px; background: var(--bg3);
+    border: 1px solid var(--border); border-radius: 8px;
+    cursor: pointer; transition: all .18s; text-align: left;
+    font-family: var(--mono);
+  }
+  .example-btn:hover { border-color: var(--accent2); background: rgba(124,79,255,0.08); }
+  .example-btn .name { font-size: 11px; font-weight: 600; color: var(--accent2); margin-bottom: 3px; }
+  .example-btn .desc { font-size: 10px; color: var(--text3); }
+
+  /* ===== COUNTERS ===== */
+  .steps-count { font-family: var(--mono); font-size: 11px; color: var(--text3); }
+
+  /* ===== SCROLLBAR ===== */
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
+
+  /* ===== IMPORT / EXPORT ===== */
+  .import-export-row { display: flex; gap: 8px; margin-top: 10px; }
+  .import-export-row .btn { font-size: 11px; padding: 6px 10px; }
+
+  /* ===== STEP LIMIT WARNING ===== */
+  .step-limit-row { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+  .step-limit-row label { margin: 0; }
+  .step-limit-row input { width: 90px; flex-shrink: 0; }
+</style>
+</head>
+<body>
+
+<!-- decorative backgrounds -->
+<div class="scanline-bg"></div>
+<div class="grid-bg"></div>
+<div class="orb orb-1"></div>
+<div class="orb orb-2"></div>
+<div class="orb orb-3"></div>
+
+<div id="app">
+  <!-- ===== HEADER ===== -->
+  <div class="header">
+    <h1>⊢ TURING MACHINE SIMULATOR</h1>
+    <p>
+      <span class="dot" style="background:#4f7cff"></span>States
+      <span class="dot" style="background:#7c4fff"></span>Transitions
+      <span class="dot" style="background:#ff4f7c"></span>Tape
+      <span class="dot" style="background:#4fffa0"></span>Halting
+    </p>
+  </div>
+
+  <div class="layout">
+    <!-- ===== LEFT COLUMN: Machine Definition ===== -->
+    <div class="left-col" style="display:flex;flex-direction:column;gap:16px;">
+      <div class="panel">
+        <div class="panel-header">
+          <span class="dot" style="background:#7c4fff"></span> Machine Definition
+        </div>
+        <div class="panel-body">
+
+          <!-- Tab Row -->
+          <div class="tab-row">
+            <div class="tab active" id="tab-config"   onclick="switchTab('config')">Config</div>
+            <div class="tab"        id="tab-delta"    onclick="switchTab('delta')">Transitions δ</div>
+            <div class="tab"        id="tab-examples" onclick="switchTab('examples')">Examples</div>
+          </div>
+
+          <!-- ===== CONFIG TAB ===== -->
+          <div id="pane-config">
+            <div class="field">
+              <label>States Q (comma-separated)</label>
+              <input id="inp-states" placeholder="q0, q1, qA, qR" value="q0,q1,q2,qA,qR">
+            </div>
+            <div class="field">
+              <label>Start State q₀</label>
+              <input id="inp-start" placeholder="q0" value="q0">
+            </div>
+            <div class="field">
+              <label>Accept State qA</label>
+              <input id="inp-accept" placeholder="qA" value="qA">
+            </div>
+            <div class="field">
+              <label>Reject State qR</label>
+              <input id="inp-reject" placeholder="qR" value="qR">
+            </div>
+            <div class="field">
+              <label>Input Alphabet Σ (comma-sep)</label>
+              <input id="inp-inputAlph" placeholder="0,1" value="0,1">
+            </div>
+            <div class="field">
+              <label>Tape Alphabet Γ (include blank)</label>
+              <input id="inp-tapeAlph" placeholder="0,1,_,X" value="0,1,_,X">
+            </div>
+            <div class="field">
+              <label>Blank Symbol (default: _)</label>
+              <input id="inp-blank" placeholder="_" value="_" style="max-width:100px">
+            </div>
+            <div class="field">
+              <label>Initial Tape Input</label>
+              <input id="inp-tape" placeholder="Enter input string" value="0011">
+            </div>
+            <div class="step-limit-row field">
+              <label>Step Limit (0 = unlimited)</label>
+              <input id="inp-steplimit" type="number" value="1000" min="0" step="100" style="max-width:100px">
+            </div>
+
+            <!-- Import / Export JSON -->
+            <div class="import-export-row">
+              <button class="btn" onclick="exportMachineJSON()" title="Export current machine definition as JSON">⬇ Export JSON</button>
+              <label class="btn" style="cursor:pointer;margin:0" title="Import machine definition from JSON file">
+                ⬆ Import JSON
+                <input type="file" accept=".json" style="display:none" onchange="importMachineJSON(event)">
+              </label>
+            </div>
+          </div>
+
+          <!-- ===== TRANSITIONS TAB ===== -->
+          <div id="pane-delta" style="display:none">
+            <p style="font-size:11px;color:var(--text3);margin-bottom:8px;font-family:var(--mono);">
+              Format: (state, read) → (write, direction, next_state) &nbsp;|&nbsp; Direction: L / R / S
+            </p>
+            <div style="overflow-x:auto;max-height:210px;overflow-y:auto;margin-bottom:4px;">
+              <table class="delta-table">
+                <thead>
+                  <tr>
+                    <th>State</th><th>Read</th><th>Write</th><th>Dir</th><th>Next</th><th></th>
+                  </tr>
+                </thead>
+                <tbody id="delta-tbody"></tbody>
+              </table>
+            </div>
+
+            <!-- Add-transition mini-form -->
+            <div class="add-trans">
+              <div class="field"><label>State</label><input id="t-state" placeholder="q0"></div>
+              <div class="field"><label>Read</label><input id="t-read"  placeholder="0"></div>
+              <div class="field"><label>Write</label><input id="t-write" placeholder="X"></div>
+              <div class="field"><label>Dir</label><input  id="t-dir"   placeholder="R" style="text-transform:uppercase"></div>
+              <div class="field"><label>Next</label><input id="t-next"  placeholder="q1"></div>
+              <button class="btn primary" onclick="addTransition()" style="align-self:flex-end;margin-bottom:0">+</button>
+            </div>
+          </div>
+
+          <!-- ===== EXAMPLES TAB ===== -->
+          <div id="pane-examples" style="display:none">
+            <p style="font-size:11px;color:var(--text3);margin-bottom:10px;font-family:var(--mono);">
+              Click to load a pre-built machine:
+            </p>
+            <div class="examples-grid">
+              <div class="example-btn" onclick="loadExample('zero_n_one_n')">
+                <div class="name">0ⁿ1ⁿ</div>
+                <div class="desc">n zeros followed by n ones</div>
+              </div>
+              <div class="example-btn" onclick="loadExample('palindrome')">
+                <div class="name">Palindrome</div>
+                <div class="desc">Palindromes over {0,1}</div>
+              </div>
+              <div class="example-btn" onclick="loadExample('binary_increment')">
+                <div class="name">Binary +1</div>
+                <div class="desc">Increments a binary number</div>
+              </div>
+              <div class="example-btn" onclick="loadExample('binary_even')">
+                <div class="name">Binary Even</div>
+                <div class="desc">Accepts even binary numbers</div>
+              </div>
+              <div class="example-btn" onclick="loadExample('unary_add')">
+                <div class="name">Unary Add</div>
+                <div class="desc">Adds two unary numbers (11+111)</div>
+              </div>
+              <div class="example-btn" onclick="loadExample('anbnc')">
+                <div class="name">aⁿbⁿcⁿ</div>
+                <div class="desc">Context-sensitive: equal a, b, c</div>
+              </div>
+              <div class="example-btn" onclick="loadExample('equal_zeros_ones')">
+                <div class="name">Equal 0s &amp; 1s</div>
+                <div class="desc">Same count of 0s and 1s (any order)</div>
+              </div>
+              <div class="example-btn" onclick="loadExample('wcwR')">
+                <div class="name">wcwᴿ</div>
+                <div class="desc">w·c·reverse(w) over {0,1,c}</div>
+              </div>
+              <div class="example-btn" onclick="loadExample('binary_div3')">
+                <div class="name">Divisible by 3</div>
+                <div class="desc">Binary numbers divisible by 3</div>
+              </div>
+              <div class="example-btn" onclick="loadExample('pow2_zeros')">
+                <div class="name">0^(2ⁿ)</div>
+                <div class="desc">Zeros whose count is a power of 2</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== RIGHT COLUMN: Tape + Controls ===== -->
+    <div class="right-col" style="display:flex;flex-direction:column;gap:16px;">
+
+      <!-- Tape Visualizer -->
+      <div class="panel">
+        <div class="panel-header" style="justify-content:space-between;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span class="dot" style="background:#ff4f7c"></span> Tape (infinite)
+          </div>
+          <span class="steps-count">
+            Step: <span id="step-count">0</span> &nbsp;|&nbsp; Head: <span id="head-pos">0</span>
+          </span>
+        </div>
+        <div class="panel-body" style="padding:8px 12px;">
+          <div class="head-indicator">
+            <span class="head-arrow">▼</span>
+            <span style="font-family:var(--mono);font-size:11px;">HEAD</span>
+          </div>
+          <div class="tape-outer" id="tape-outer">
+            <div class="tape" id="tape-display"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Control Unit -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="dot" style="background:#4fffa0"></span> Control Unit
+        </div>
+        <div class="panel-body">
+
+          <!-- Current state / symbol / status -->
+          <div class="state-display">
+            <div class="state-box" id="box-state">
+              <div class="label">Current State</div>
+              <div class="value" id="val-state">—</div>
+            </div>
+            <div class="state-box" id="box-sym">
+              <div class="label">Read Symbol</div>
+              <div class="value" id="val-sym">—</div>
+            </div>
+            <div class="state-box" id="box-status">
+              <div class="label">Status</div>
+              <div class="value" id="val-status">IDLE</div>
+            </div>
+          </div>
+
+          <!-- Last transition applied -->
+          <div class="status-bar" id="status-bar" style="color:var(--text2)">
+            <span>▸</span>
+            <span id="status-msg">Define machine and click ⚙ Load Machine to begin.</span>
+          </div>
+
+          <!-- Buttons -->
+          <div class="btn-row">
+            <button class="btn primary"   onclick="loadMachine()">⚙ Load Machine</button>
+            <button class="btn"           onclick="stepOnce()"  id="btn-step"  disabled>↷ Step</button>
+            <button class="btn green-btn" onclick="runAuto()"   id="btn-run"   disabled>▶ Run</button>
+            <button class="btn"           onclick="pauseSim()"  id="btn-pause" disabled style="display:none">⏸ Pause</button>
+            <button class="btn danger"    onclick="resetSim()"  id="btn-reset" disabled>↺ Reset</button>
+          </div>
+
+          <!-- Speed -->
+          <div class="speed-row">
+            <label>Speed</label>
+            <input type="range" id="speed" min="50" max="2000" value="350" step="50"
+                   oninput="document.getElementById('speed-label').textContent=this.value+'ms'">
+            <span id="speed-label" style="font-family:var(--mono);font-size:11px;color:var(--text2);min-width:52px;">350ms</span>
+          </div>
+
+          <!-- Transition Log -->
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <label style="margin:0">Transition Log</label>
+            <button class="btn" onclick="clearLog()" style="padding:3px 8px;font-size:10px;">Clear</button>
+          </div>
+          <div class="transition-log" id="trans-log">
+            <div style="color:var(--text3);font-family:var(--mono);font-size:11px;padding:4px;">// log will appear here</div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Transition Table (live view, highlighted) -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="dot" style="background:#ffd24f"></span> Transition Function δ (live)
+        </div>
+        <div class="panel-body" style="padding:8px 16px">
+          <div style="overflow-x:auto;max-height:180px;overflow-y:auto;">
+            <table class="delta-table" id="live-delta-table">
+              <thead>
+                <tr>
+                  <th>State</th><th>Read</th><th>→</th><th>Write</th><th>Dir</th><th>Next State</th>
+                </tr>
+              </thead>
+              <tbody id="live-delta-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /right column -->
+  </div><!-- /layout -->
+</div><!-- /app -->
+
+<script>
+/*
+ * =============================================================
+ *  GENERAL-PURPOSE TURING MACHINE SIMULATOR
+ *  Structure:
+ *    1. Pre-defined Examples
+ *    2. Tape  — infinite dynamic tape class
+ *    3. TuringMachine — machine definition + transition lookup
+ *    4. Simulator — execution engine (step / run / reset)
+ *    5. UI helpers — render, status, log
+ *    6. UI event handlers
+ * =============================================================
+ */
+
+/* ------------------------------------------------------------------ */
+/* 1. PRE-DEFINED EXAMPLES                                             */
+/* ------------------------------------------------------------------ */
+const EXAMPLES = {
+
+  /* 0^n 1^n — classic context-free language.
+     Marks each 0 with X, seeks its matching 1 and marks it Y, repeats. */
+  zero_n_one_n: {
+    states:'q0,q1,q2,q3,qA,qR', start:'q0', accept:'qA', reject:'qR',
+    inputAlph:'0,1', tapeAlph:'0,1,X,Y,_', blank:'_', tape:'0011',
+    transitions:[
+      ['q0','0','X','R','q1'],['q0','Y','Y','R','q3'],['q0','_','_','R','qA'],
+      ['q1','0','0','R','q1'],['q1','Y','Y','R','q1'],['q1','1','Y','L','q2'],['q1','_','_','R','qR'],
+      ['q2','0','0','L','q2'],['q2','Y','Y','L','q2'],['q2','X','X','R','q0'],
+      ['q3','Y','Y','R','q3'],['q3','_','_','R','qA'],['q3','1','1','R','qR'],
+    ]
+  },
+
+  /* Palindrome over {0,1} — strip matching outer chars until empty or single char. */
+  palindrome: {
+    states:'q0,q1,q2,q3,q4,q5,qA,qR', start:'q0', accept:'qA', reject:'qR',
+    inputAlph:'0,1', tapeAlph:'0,1,X,Y,_', blank:'_', tape:'1001',
+    transitions:[
+      ['q0','_','_','R','qA'],['q0','X','X','R','qA'],['q0','Y','Y','R','qA'],
+      ['q0','0','X','R','q1'],['q0','1','Y','R','q3'],
+      ['q1','0','0','R','q1'],['q1','1','1','R','q1'],['q1','X','X','R','q1'],['q1','Y','Y','R','q1'],['q1','_','_','L','q2'],
+      ['q2','0','X','L','q4'],['q2','X','X','L','q2'],['q2','Y','Y','L','q2'],['q2','1','1','L','qR'],['q2','_','_','R','qA'],
+      ['q3','0','0','R','q3'],['q3','1','1','R','q3'],['q3','X','X','R','q3'],['q3','Y','Y','R','q3'],['q3','_','_','L','q5'],
+      ['q5','1','Y','L','q4'],['q5','Y','Y','L','q5'],['q5','X','X','L','q5'],['q5','0','0','L','qR'],['q5','_','_','R','qA'],
+      ['q4','0','0','L','q4'],['q4','1','1','L','q4'],['q4','X','X','R','q0'],['q4','Y','Y','R','q0'],
+    ]
+  },
+
+  /* Binary +1 — scan to end, propagate carry from LSB. */
+  binary_increment: {
+    states:'q0,q1,qA,qR', start:'q0', accept:'qA', reject:'qR',
+    inputAlph:'0,1', tapeAlph:'0,1,_', blank:'_', tape:'10111',
+    transitions:[
+      ['q0','0','0','R','q0'],['q0','1','1','R','q0'],['q0','_','_','L','q1'],
+      ['q1','1','0','L','q1'],['q1','0','1','S','qA'],['q1','_','1','S','qA'],
+    ]
+  },
+
+  /* Binary even — accepts binary numbers ending in 0. */
+  binary_even: {
+    states:'q0,q1,qA,qR', start:'q0', accept:'qA', reject:'qR',
+    inputAlph:'0,1', tapeAlph:'0,1,_', blank:'_', tape:'1010',
+    transitions:[
+      ['q0','0','0','R','q0'],['q0','1','1','R','q0'],['q0','_','_','L','q1'],
+      ['q1','0','0','R','qA'],['q1','1','1','R','qR'],
+    ]
+  },
+
+  /* Unary addition — 11+111 becomes 11111. */
+  unary_add: {
+    states:'q0,q1,q2,qA,qR', start:'q0', accept:'qA', reject:'qR',
+    inputAlph:'1,+', tapeAlph:'1,+,_', blank:'_', tape:'11+111',
+    transitions:[
+      ['q0','1','1','R','q0'],['q0','+','1','R','q1'],
+      ['q1','1','1','R','q1'],['q1','_','_','L','q2'],
+      ['q2','1','_','R','qA'],
+    ]
+  },
+
+  /* a^n b^n c^n — context-sensitive language, not context-free.
+     Each pass marks one a (→X), one b (→Y), one c (→Z). */
+  anbnc: {
+    states:'q0,q1,q2,q3,q4,q5,qA,qR', start:'q0', accept:'qA', reject:'qR',
+    inputAlph:'a,b,c', tapeAlph:'a,b,c,X,Y,Z,_', blank:'_', tape:'aabbcc',
+    transitions:[
+      ['q0','_','_','R','qA'],['q0','X','X','R','q0'],
+      ['q0','a','X','R','q1'],['q0','Y','Y','R','q4'],
+      ['q1','a','a','R','q1'],['q1','X','X','R','q1'],['q1','b','Y','R','q2'],
+      ['q1','Y','Y','R','q1'],['q1','_','_','R','qR'],['q1','Z','Z','R','qR'],
+      ['q2','b','b','R','q2'],['q2','Y','Y','R','q2'],['q2','c','Z','L','q3'],
+      ['q2','Z','Z','R','q2'],['q2','_','_','R','qR'],
+      ['q3','a','a','L','q3'],['q3','b','b','L','q3'],['q3','Y','Y','L','q3'],
+      ['q3','Z','Z','L','q3'],['q3','X','X','R','q0'],['q3','_','_','R','q0'],
+      ['q4','Y','Y','R','q4'],['q4','b','b','R','qR'],['q4','Z','Z','R','q5'],
+      ['q4','_','_','R','qR'],
+      ['q5','Z','Z','R','q5'],['q5','_','_','R','qA'],['q5','c','c','R','qR'],
+    ]
+  },
+
+  /* Equal 0s and 1s — accepts strings with same number of 0s and 1s (any order). */
+  equal_zeros_ones: {
+    states:'q0,q1,q2,q3,qA,qR', start:'q0', accept:'qA', reject:'qR',
+    inputAlph:'0,1', tapeAlph:'0,1,X,_', blank:'_', tape:'010101',
+    transitions:[
+      ['q0','_','_','R','qA'],['q0','X','X','R','q0'],
+      ['q0','0','X','R','q1'],['q0','1','X','R','q2'],
+      ['q1','0','0','R','q1'],['q1','X','X','R','q1'],['q1','1','X','L','q3'],['q1','_','_','R','qR'],
+      ['q2','1','1','R','q2'],['q2','X','X','R','q2'],['q2','0','X','L','q3'],['q2','_','_','R','qR'],
+      ['q3','0','0','L','q3'],['q3','1','1','L','q3'],['q3','X','X','L','q3'],['q3','_','_','R','q0'],
+    ]
+  },
+
+  /* wcw^R — strings of form w·c·reverse(w), over {0,1,c}.
+     Matches outer chars around the literal 'c' separator. */
+  wcwR: {
+    states:'q0,q1,q2,q3,q3r,q4,q4r,qb,q5,qA,qR', start:'q0', accept:'qA', reject:'qR',
+    inputAlph:'0,1,c', tapeAlph:'0,1,c,X,Y,_', blank:'_', tape:'01c10',
+    transitions:[
+      ['q0','c','c','R','q5'],['q0','X','X','R','q0'],['q0','Y','Y','R','q0'],
+      ['q0','0','X','R','q1'],['q0','1','Y','R','q2'],['q0','_','_','R','qR'],
+      ['q1','0','0','R','q1'],['q1','1','1','R','q1'],['q1','X','X','R','q1'],
+      ['q1','Y','Y','R','q1'],['q1','c','c','R','q3'],['q1','_','_','R','qR'],
+      ['q2','0','0','R','q2'],['q2','1','1','R','q2'],['q2','X','X','R','q2'],
+      ['q2','Y','Y','R','q2'],['q2','c','c','R','q4'],['q2','_','_','R','qR'],
+      ['q3','0','0','R','q3'],['q3','1','1','R','q3'],['q3','X','X','R','q3'],
+      ['q3','Y','Y','R','q3'],['q3','_','_','L','q3r'],
+      ['q3r','0','X','L','qb'],['q3r','X','X','L','q3r'],['q3r','Y','Y','L','q3r'],
+      ['q3r','1','1','L','qR'],['q3r','c','c','L','qR'],
+      ['q4','0','0','R','q4'],['q4','1','1','R','q4'],['q4','X','X','R','q4'],
+      ['q4','Y','Y','R','q4'],['q4','_','_','L','q4r'],
+      ['q4r','1','Y','L','qb'],['q4r','Y','Y','L','q4r'],['q4r','X','X','L','q4r'],
+      ['q4r','0','0','L','qR'],['q4r','c','c','L','qR'],
+      ['qb','0','0','L','qb'],['qb','1','1','L','qb'],['qb','X','X','L','qb'],
+      ['qb','Y','Y','L','qb'],['qb','c','c','L','qb'],['qb','_','_','R','q0'],
+      ['q5','X','X','R','q5'],['q5','Y','Y','R','q5'],
+      ['q5','_','_','R','qA'],['q5','0','0','R','qR'],['q5','1','1','R','qR'],
+    ]
+  },
+
+  /* Binary divisible by 3 — simulates a 3-state DFA tracking remainder mod 3. */
+  binary_div3: {
+    states:'r0,r1,r2,qA,qR', start:'r0', accept:'qA', reject:'qR',
+    inputAlph:'0,1', tapeAlph:'0,1,_', blank:'_', tape:'1001',
+    transitions:[
+      ['r0','0','0','R','r0'],['r0','1','1','R','r1'],['r0','_','_','R','qA'],
+      ['r1','0','0','R','r2'],['r1','1','1','R','r0'],['r1','_','_','R','qR'],
+      ['r2','0','0','R','r1'],['r2','1','1','R','r2'],['r2','_','_','R','qR'],
+    ]
+  },
+
+  /* 0^(2^n) — strings of zeros whose length is a power of 2.
+     Each pass marks every other 0 with X (halves the count); accept when 1 remains. */
+  pow2_zeros: {
+    states:'q0,q1a,q1b,q2,q3,qA,qR', start:'q0', accept:'qA', reject:'qR',
+    inputAlph:'0', tapeAlph:'0,X,_', blank:'_', tape:'0000',
+    transitions:[
+      ['q0','_','_','R','qR'],['q0','X','X','R','q0'],['q0','0','0','R','q1a'],
+      ['q1a','_','_','R','qA'],['q1a','X','X','R','q1a'],['q1a','0','X','R','q2'],
+      ['q2','X','X','R','q2'],['q2','0','0','R','q1b'],['q2','_','_','L','q3'],
+      ['q1b','X','X','R','q1b'],['q1b','0','X','R','q2'],['q1b','_','_','R','qR'],
+      ['q3','0','0','L','q3'],['q3','X','X','L','q3'],['q3','_','_','R','q0'],
+    ]
+  },
+
+};
+
+
+/* ------------------------------------------------------------------ */
+/* 2. TAPE — dynamic, infinite in both directions                       */
+/*    Internal representation: array + offset                          */
+/*    index 0 = tape[offset], negative indices extend left             */
+/* ------------------------------------------------------------------ */
+class Tape {
+  /**
+   * @param {string}   input  - initial string on tape
+   * @param {string}   blank  - blank symbol character
+   */
+  constructor(input, blank = '_') {
+    this.blank  = blank;
+    this.data   = {};   // sparse map: integer index → symbol
+    this.origin = 0;    // logical position of leftmost input char
+    // Write initial input at positions 0, 1, 2, …
+    for (let i = 0; i < input.length; i++) {
+      this.data[i] = input[i];
+    }
+  }
+
+  /** Read symbol at logical position pos */
+  read(pos) {
+    return this.data[pos] !== undefined ? this.data[pos] : this.blank;
+  }
+
+  /** Write symbol at logical position pos */
+  write(pos, sym) {
+    if (sym === this.blank) {
+      delete this.data[pos]; // keep sparse
+    } else {
+      this.data[pos] = sym;
+    }
+  }
+
+  /**
+   * Return a window of cells around `center` for display.
+   * Extends left/right with blanks as needed.
+   * @param {number} center  - head position
+   * @param {number} radius  - cells on each side
+   * @returns {{ cells: Array<{pos, sym}>, headIdx: number }}
+   */
+  getWindow(center, radius = 14) {
+    const cells = [];
+    for (let p = center - radius; p <= center + radius; p++) {
+      cells.push({ pos: p, sym: this.read(p) });
+    }
+    return { cells, headIdx: radius };
+  }
+}
+
+
+/* ------------------------------------------------------------------ */
+/* 3. TURING MACHINE — definition + transition lookup                  */
+/* ------------------------------------------------------------------ */
+class TuringMachine {
+  /**
+   * @param {object} def - machine definition
+   * @param {string[]} def.states
+   * @param {string}   def.start
+   * @param {string}   def.accept
+   * @param {string}   def.reject
+   * @param {string}   def.blank
+   * @param {Array[]}  def.transitions - [[state,read,write,dir,next], …]
+   */
+  constructor(def) {
+    this.states  = new Set(def.states);
+    this.start   = def.start;
+    this.accept  = def.accept;
+    this.reject  = def.reject;
+    this.blank   = def.blank || '_';
+
+    // Build delta map: "state,read" → { write, dir, next }
+    this.delta   = new Map();
+    for (const [state, read, write, dir, next] of def.transitions) {
+      const key = `${state}\x00${read}`;
+      this.delta.set(key, { write, dir: dir.toUpperCase(), next });
+    }
+  }
+
+  /**
+   * Look up transition.
+   * @returns {{ write, dir, next } | null}
+   */
+  transition(state, sym) {
+    return this.delta.get(`${state}\x00${sym}`) || null;
+  }
+
+  isAccept(state) { return state === this.accept; }
+  isReject(state) { return state === this.reject; }
+  isHalting(state) { return this.isAccept(state) || this.isReject(state); }
+}
+
+
+/* ------------------------------------------------------------------ */
+/* 4. SIMULATOR — execution engine                                     */
+/* ------------------------------------------------------------------ */
+const Sim = {
+  machine:   null,   // TuringMachine
+  tape:      null,   // Tape
+  state:     '',     // current state
+  head:      0,      // head position (logical tape index)
+  step:      0,      // step counter
+  halted:    false,
+  running:   false,
+  timer:     null,
+  lastTrans: null,   // last applied transition key [state, sym]
+  stepLimit: 1000,   // 0 = unlimited
+
+  /** Load (or re-load) from raw definition */
+  load(def, inputStr) {
+    this.machine   = new TuringMachine(def);
+    this.tape      = new Tape(inputStr, def.blank || '_');
+    this.state     = def.start;
+    this.head      = 0;
+    this.step      = 0;
+    this.halted    = false;
+    this.running   = false;
+    this.lastTrans = null;
+    if (this.timer) clearTimeout(this.timer);
+  },
+
+  /** Execute one step. Returns 'running' | 'accepted' | 'rejected' | 'error' | 'limit' */
+  doStep() {
+    if (this.halted) return 'halted';
+
+    // Check accept / reject before any transition
+    if (this.machine.isAccept(this.state)) { this.halted = true; return 'accepted'; }
+    if (this.machine.isReject(this.state)) { this.halted = true; return 'rejected'; }
+
+    const sym    = this.tape.read(this.head);
+    const trans  = this.machine.transition(this.state, sym);
+
+    if (!trans) {
+      // Undefined transition → implicit reject
+      this.halted = true;
+      return { outcome: 'error', state: this.state, sym };
+    }
+
+    this.lastTrans = [this.state, sym];
+
+    // Apply transition
+    const prevState = this.state;
+    this.tape.write(this.head, trans.write);
+    this.state = trans.next;
+
+    // Move head
+    if      (trans.dir === 'R') this.head++;
+    else if (trans.dir === 'L') this.head--;
+    // 'S' = Stay, no movement
+
+    this.step++;
+
+    // Step limit check
+    if (this.stepLimit > 0 && this.step >= this.stepLimit) {
+      this.halted = true;
+      return { outcome: 'limit', step: this.step };
+    }
+
+    // Check halting after transition
+    if (this.machine.isAccept(this.state)) { this.halted = true; return { outcome: 'accepted', prevState, sym, trans }; }
+    if (this.machine.isReject(this.state)) { this.halted = true; return { outcome: 'rejected', prevState, sym, trans }; }
+
+    return { outcome: 'running', prevState, sym, trans };
+  },
+};
+
+
+/* ------------------------------------------------------------------ */
+/* 5. UI HELPERS                                                        */
+/* ------------------------------------------------------------------ */
+
+/** Render the tape window centered on head */
+function renderTape(flashCell = -1) {
+  const container = document.getElementById('tape-display');
+  if (!Sim.tape) { container.innerHTML = ''; return; }
+
+  const { cells, headIdx } = Sim.tape.getWindow(Sim.head, 14);
+  container.innerHTML = '';
+
+  cells.forEach(({ pos, sym }, i) => {
+    const cell = document.createElement('div');
+    cell.className = 'tape-cell';
+    if (i === headIdx)  cell.classList.add('active');
+    if (i === flashCell) cell.classList.add('wrote');
+    cell.textContent = sym === Sim.tape.blank ? '□' : sym;
+
+    const idx = document.createElement('span');
+    idx.className = 'idx';
+    idx.textContent = pos;
+    cell.appendChild(idx);
+
+    container.appendChild(cell);
+  });
+
+  // Scroll head to center
+  setTimeout(() => {
+    const outer = document.getElementById('tape-outer');
+    const headCell = container.children[headIdx];
+    if (headCell) {
+      outer.scrollLeft = headCell.offsetLeft - outer.clientWidth / 2 + headCell.offsetWidth / 2;
+    }
+  }, 10);
+
+  document.getElementById('step-count').textContent = Sim.step;
+  document.getElementById('head-pos').textContent   = Sim.head;
+}
+
+/** Update the three state boxes */
+function updateStateBoxes() {
+  const sym = Sim.tape ? (Sim.tape.read(Sim.head) === (Sim.tape ? Sim.tape.blank : '_') ? '□' : Sim.tape.read(Sim.head)) : '—';
+
+  document.getElementById('val-state').textContent = Sim.state || '—';
+  document.getElementById('val-sym').textContent   = sym;
+
+  const statusBox = document.getElementById('box-status');
+  const statusVal = document.getElementById('val-status');
+  const stateBox  = document.getElementById('box-state');
+
+  statusBox.className = 'state-box';
+  stateBox.className  = 'state-box';
+
+  if (!Sim.machine) {
+    statusVal.textContent = 'IDLE';
+  } else if (Sim.machine.isAccept(Sim.state)) {
+    statusVal.textContent = 'ACCEPT'; statusBox.classList.add('accept'); stateBox.classList.add('accept');
+  } else if (Sim.machine.isReject(Sim.state)) {
+    statusVal.textContent = 'REJECT'; statusBox.classList.add('reject'); stateBox.classList.add('reject');
+  } else if (Sim.halted) {
+    statusVal.textContent = 'HALT';   statusBox.classList.add('reject');
+  } else if (Sim.running) {
+    statusVal.textContent = 'RUN';    statusBox.classList.add('running');
+  } else {
+    statusVal.textContent = 'READY';
+  }
+}
+
+/** Set the status bar */
+function setStatus(type, msg) {
+  const bar  = document.getElementById('status-bar');
+  const span = document.getElementById('status-msg');
+  bar.className = 'status-bar ' + ({ ok:'ok', err:'err', warn:'warn', info:'info' }[type] || 'info');
+  span.textContent = msg;
+}
+
+/** Add entry to log (most recent at top) */
+function addLog(step, msg, cls = '') {
+  const log  = document.getElementById('trans-log');
+  const entry = document.createElement('div');
+  entry.className = 'log-entry';
+  entry.innerHTML = `<span class="log-step">#${step}</span><span class="log-arrow">→</span><span class="${cls}">${msg}</span>`;
+  // Remove placeholder
+  const ph = log.querySelector('[style*="text3"]');
+  if (ph) ph.remove();
+  log.insertBefore(entry, log.firstChild);
+}
+
+function clearLog() {
+  document.getElementById('trans-log').innerHTML =
+    '<div style="color:var(--text3);font-family:var(--mono);font-size:11px;padding:4px;">// cleared</div>';
+}
+
+/** Render delta table with current-transition highlight */
+function renderLiveDelta() {
+  const tbody = document.getElementById('live-delta-tbody');
+  if (!Sim.machine) { tbody.innerHTML = ''; return; }
+
+  tbody.innerHTML = '';
+  Sim.machine.delta.forEach(({ write, dir, next }, key) => {
+    const [state, sym] = key.split('\x00');
+    const tr = document.createElement('tr');
+    const isActive = Sim.lastTrans && Sim.lastTrans[0] === state && Sim.lastTrans[1] === sym;
+    if (isActive) tr.classList.add('current-transition');
+    tr.innerHTML = `<td>${state}</td><td>${sym === '_' ? '□' : sym}</td><td>→</td><td>${write === '_' ? '□' : write}</td><td>${dir}</td><td>${next}</td>`;
+    tbody.appendChild(tr);
+  });
+
+  // Scroll highlighted row into view
+  const active = tbody.querySelector('.current-transition');
+  if (active) active.scrollIntoView({ block: 'nearest' });
+}
+
+/** Render the edit-mode delta table (for Transitions tab) */
+function renderEditDelta() {
+  const tbody = document.getElementById('delta-tbody');
+  tbody.innerHTML = '';
+  uiTransitions.forEach((t, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${t[0]}</td><td>${t[1]}</td><td>${t[2]}</td><td>${t[3]}</td><td>${t[4]}</td>
+      <td><button class="del-btn" onclick="delTransition(${i})">×</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+/** Show/hide run buttons consistently */
+function showRunButtons() {
+  document.getElementById('btn-run').style.display   = '';
+  document.getElementById('btn-pause').style.display = 'none';
+  document.getElementById('btn-step').disabled       = Sim.halted;
+  document.getElementById('btn-run').disabled        = Sim.halted;
+}
+
+
+/* ------------------------------------------------------------------ */
+/* 6. UI EVENT HANDLERS                                                 */
+/* ------------------------------------------------------------------ */
+
+// Stores transitions as entered in the edit UI
+let uiTransitions = [];
+
+function switchTab(t) {
+  ['config', 'delta', 'examples'].forEach(x => {
+    document.getElementById('tab-'   + x).classList.toggle('active', x === t);
+    document.getElementById('pane-'  + x).style.display = x === t ? '' : 'none';
+  });
+  if (t === 'delta') renderEditDelta();
+}
+
+/** Load an example into the UI */
+function loadExample(name) {
+  const ex = EXAMPLES[name];
+  if (!ex) return;
+
+  document.getElementById('inp-states').value    = ex.states;
+  document.getElementById('inp-start').value     = ex.start;
+  document.getElementById('inp-accept').value    = ex.accept;
+  document.getElementById('inp-reject').value    = ex.reject;
+  document.getElementById('inp-inputAlph').value = ex.inputAlph;
+  document.getElementById('inp-tapeAlph').value  = ex.tapeAlph;
+  document.getElementById('inp-blank').value     = ex.blank || '_';
+  document.getElementById('inp-tape').value      = ex.tape;
+
+  uiTransitions = ex.transitions.map(t => [...t]);
+  renderEditDelta();
+  switchTab('config');
+  setStatus('info', `✓ Loaded "${name}". Click ⚙ Load Machine to initialise.`);
+}
+
+/** Add transition from form fields */
+function addTransition() {
+  const fields = ['t-state','t-read','t-write','t-dir','t-next'];
+  const vals   = fields.map(id => document.getElementById(id).value.trim());
+
+  if (vals.some(v => !v)) { setStatus('err', 'Fill all five fields before adding.'); return; }
+
+  const dir = vals[3].toUpperCase();
+  if (!['L','R','S'].includes(dir)) { setStatus('err', 'Direction must be L, R, or S (Stay).'); return; }
+
+  vals[3] = dir;
+  uiTransitions.push(vals);
+  renderEditDelta();
+
+  // Clear inputs
+  fields.forEach(id => document.getElementById(id).value = '');
+  document.getElementById('t-state').focus();
+}
+
+/** Delete transition row */
+function delTransition(i) {
+  uiTransitions.splice(i, 1);
+  renderEditDelta();
+}
+
+/** Build machine from UI inputs and initialise simulator */
+function loadMachine() {
+  // Read and validate config
+  const rawStates  = document.getElementById('inp-states').value.split(',').map(s => s.trim()).filter(Boolean);
+  const start      = document.getElementById('inp-start').value.trim();
+  const accept     = document.getElementById('inp-accept').value.trim();
+  const reject     = document.getElementById('inp-reject').value.trim();
+  const blank      = document.getElementById('inp-blank').value.trim() || '_';
+  const tapeStr    = document.getElementById('inp-tape').value;
+  const limitRaw   = parseInt(document.getElementById('inp-steplimit').value);
+  const stepLimit  = isNaN(limitRaw) ? 1000 : Math.max(0, limitRaw);
+
+  if (!rawStates.length) { setStatus('err', 'At least one state required.'); return; }
+  if (!start)            { setStatus('err', 'Start state required.');          return; }
+  if (!accept)           { setStatus('err', 'Accept state required.');         return; }
+
+  if (!rawStates.includes(start))  { setStatus('err', `Start state "${start}" not in Q.`);  return; }
+  if (!rawStates.includes(accept)) { setStatus('err', `Accept state "${accept}" not in Q.`); return; }
+  if (reject && !rawStates.includes(reject)) { setStatus('err', `Reject state "${reject}" not in Q.`); return; }
+
+  // Validate transitions reference known states
+  for (const [s,,,, nxt] of uiTransitions) {
+    if (!rawStates.includes(s))   { setStatus('err', `Unknown state "${s}" in transitions.`);   return; }
+    if (!rawStates.includes(nxt)) { setStatus('err', `Unknown next state "${nxt}" in transitions.`); return; }
+  }
+
+  const def = {
+    states:      rawStates,
+    start, accept, reject, blank,
+    transitions: uiTransitions,
+  };
+
+  Sim.stepLimit = stepLimit;
+  Sim.load(def, tapeStr);
+
+  renderTape();
+  renderLiveDelta();
+  updateStateBoxes();
+  clearLog();
+
+  const nTrans = uiTransitions.length;
+  setStatus('info', `✓ Machine loaded — ${rawStates.length} states, ${nTrans} transition${nTrans !== 1 ? 's' : ''}. Step limit: ${stepLimit || '∞'}. Press ↷ Step or ▶ Run.`);
+
+  document.getElementById('btn-step').disabled  = false;
+  document.getElementById('btn-run').disabled   = false;
+  document.getElementById('btn-reset').disabled = false;
+  showRunButtons();
+}
+
+/** Execute one step manually */
+function stepOnce() {
+  if (!Sim.machine) { setStatus('err', 'Load machine first.'); return; }
+  if (Sim.halted)   { setStatus('warn', 'Machine has halted. Reset to try again.'); return; }
+
+  const result = Sim.doStep();
+  handleStepResult(result);
+  renderTape();
+  renderLiveDelta();
+  updateStateBoxes();
+}
+
+/** Handle step result and update UI accordingly */
+function handleStepResult(result) {
+  if (typeof result === 'string') {
+    // Simple string outcomes (legacy guard)
+    return;
+  }
+
+  const { outcome, prevState, sym, trans } = result;
+
+  if (outcome === 'running' || outcome === 'accepted' || outcome === 'rejected') {
+    const blk     = Sim.tape.blank;
+    const readSym = sym === blk ? '□' : sym;
+    const writeSym = trans.write === blk ? '□' : trans.write;
+    const msg = `(${prevState}, ${readSym}) → write:${writeSym}, move:${trans.dir}, → ${trans.next}`;
+    addLog(Sim.step, msg);
+    setStatus('info', `Step ${Sim.step}: ${msg}`);
+  }
+
+  if (outcome === 'accepted') {
+    setStatus('ok', `✓ ACCEPTED in ${Sim.step} step${Sim.step !== 1 ? 's' : ''}.`);
+    addLog(Sim.step, '✓ ACCEPTED', 'log-accept');
+    showRunButtons();
+  } else if (outcome === 'rejected') {
+    setStatus('err', `✗ REJECTED in ${Sim.step} step${Sim.step !== 1 ? 's' : ''}.`);
+    addLog(Sim.step, '✗ REJECTED', 'log-reject');
+    showRunButtons();
+  } else if (outcome === 'error') {
+    const blk = Sim.tape.blank;
+    setStatus('err', `✗ No transition for (${result.state}, ${result.sym === blk ? '□' : result.sym}). Implicit reject.`);
+    addLog(Sim.step, `✗ UNDEFINED TRANSITION — implicit reject`, 'log-reject');
+    showRunButtons();
+  } else if (outcome === 'limit') {
+    setStatus('warn', `⚠ Step limit (${result.step}) reached. Possible infinite loop. Simulation paused.`);
+    addLog(result.step, `⚠ STEP LIMIT REACHED`, 'log-reject');
+    showRunButtons();
+  }
+}
+
+/** Auto-run mode */
+function runAuto() {
+  if (!Sim.machine || Sim.halted) return;
+
+  Sim.running = true;
+  document.getElementById('btn-run').style.display   = 'none';
+  document.getElementById('btn-pause').style.display = '';
+  document.getElementById('btn-step').disabled       = true;
+  updateStateBoxes();
+  scheduleStep();
+}
+
+function scheduleStep() {
+  if (!Sim.running) return;
+  const delay = parseInt(document.getElementById('speed').value);
+  Sim.timer = setTimeout(() => {
+    if (!Sim.running) return;
+    const result = Sim.doStep();
+    handleStepResult(result);
+    renderTape();
+    renderLiveDelta();
+    updateStateBoxes();
+
+    if (!Sim.halted && Sim.running) {
+      scheduleStep();
+    } else {
+      Sim.running = false;
+      showRunButtons();
+    }
+  }, delay);
+}
+
+function pauseSim() {
+  Sim.running = false;
+  clearTimeout(Sim.timer);
+  showRunButtons();
+  updateStateBoxes();
+  setStatus('warn', `⏸ Paused at step ${Sim.step}.`);
+}
+
+/** Full reset */
+function resetSim() {
+  if (Sim.timer) clearTimeout(Sim.timer);
+  Sim.machine = null;
+  Sim.tape    = null;
+  Sim.state   = '';
+  Sim.head    = 0;
+  Sim.step    = 0;
+  Sim.halted  = false;
+  Sim.running = false;
+  Sim.lastTrans = null;
+
+  document.getElementById('tape-display').innerHTML = '';
+  document.getElementById('live-delta-tbody').innerHTML = '';
+  document.getElementById('step-count').textContent = '0';
+  document.getElementById('head-pos').textContent   = '0';
+  document.getElementById('val-state').textContent  = '—';
+  document.getElementById('val-sym').textContent    = '—';
+  document.getElementById('val-status').textContent = 'IDLE';
+  document.getElementById('box-status').className   = 'state-box';
+  document.getElementById('box-state').className    = 'state-box';
+  document.getElementById('btn-step').disabled      = true;
+  document.getElementById('btn-run').disabled       = true;
+  document.getElementById('btn-reset').disabled     = true;
+  showRunButtons();
+  clearLog();
+  setStatus('info', 'Reset complete. Load machine to begin.');
+}
+
+
+/* ------------------------------------------------------------------ */
+/* 7. IMPORT / EXPORT                                                   */
+/* ------------------------------------------------------------------ */
+
+/** Export full machine definition as JSON file */
+function exportMachineJSON() {
+  const def = {
+    states:    document.getElementById('inp-states').value,
+    start:     document.getElementById('inp-start').value.trim(),
+    accept:    document.getElementById('inp-accept').value.trim(),
+    reject:    document.getElementById('inp-reject').value.trim(),
+    inputAlph: document.getElementById('inp-inputAlph').value,
+    tapeAlph:  document.getElementById('inp-tapeAlph').value,
+    blank:     document.getElementById('inp-blank').value.trim() || '_',
+    tape:      document.getElementById('inp-tape').value,
+    transitions: uiTransitions,
+  };
+  const blob = new Blob([JSON.stringify(def, null, 2)], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = 'turing_machine.json';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/** Import machine definition from JSON file */
+function importMachineJSON(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const def = JSON.parse(e.target.result);
+      document.getElementById('inp-states').value    = def.states    || '';
+      document.getElementById('inp-start').value     = def.start     || '';
+      document.getElementById('inp-accept').value    = def.accept    || '';
+      document.getElementById('inp-reject').value    = def.reject    || '';
+      document.getElementById('inp-inputAlph').value = def.inputAlph || '';
+      document.getElementById('inp-tapeAlph').value  = def.tapeAlph  || '';
+      document.getElementById('inp-blank').value     = def.blank     || '_';
+      document.getElementById('inp-tape').value      = def.tape      || '';
+      uiTransitions = (def.transitions || []).map(t => [...t]);
+      renderEditDelta();
+      setStatus('info', `✓ Imported "${file.name}". Click ⚙ Load Machine.`);
+    } catch (err) {
+      setStatus('err', `Failed to parse JSON: ${err.message}`);
+    }
+  };
+  reader.readAsText(file);
+  // Reset input so same file can be re-imported
+  event.target.value = '';
+}
+
+
+/* ------------------------------------------------------------------ */
+/* 8. INIT                                                              */
+/* ------------------------------------------------------------------ */
+// Load 0^n 1^n example on start
+loadExample('zero_n_one_n');
+</script>
+</body>
+</html>
